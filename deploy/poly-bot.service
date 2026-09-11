@@ -1,0 +1,17 @@
+[Unit]
+Description=Poly-bot-4040 BTC 5m Hedge Bot (LIVE)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=polybot
+Group=polybot
+WorkingDirectory=/opt/poly-bot-4040
+EnvironmentFile=/opt/poly-bot-4040/.env
+ExecStart=/opt/poly-bot-4040/.venv/bin/python -m src.main
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/poly-bot/bot.log
+StandardError=append:/var/log/poly-bot/bot.log
+[Install]
+WantedBy=multi-user.target
