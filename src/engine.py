@@ -115,23 +115,23 @@ class Engine:
             except Exception:
                 logger.warning("WebSocket unavailable; continuing without real-time fills")
 
-            # Step 3: Balance check (fail-graceful)
+            # Step 3: Balance check
             if self._config.DRY_RUN:
                 logger.info("DRY_RUN: assuming sufficient balance")
             else:
                 try:
                     balance = await self._balance_check()
-                    if balance == 0:
-                        logger.warning("Balance check returned 0; continuing without rotation")
-                    elif self._config.LIVE_ENABLED and balance < self._config.TOTAL_CAP:
-                        logger.warning(
-                            "Insufficient balance (%s < %s); rotating",
-                            balance, self._config.TOTAL_CAP,
-                        )
-                        await self._rotate()
-                        continue
                 except Exception:
-                    logger.warning("Balance check failed; continuing without rotation")
+                    logger.warning("Balance check failed; rotating")
+                    await self._rotate()
+                    continue
+                if balance is None or balance == 0 or balance < self._config.TOTAL_CAP:
+                    logger.warning(
+                        "Insufficient balance (%s < %s); rotating",
+                        balance, self._config.TOTAL_CAP,
+                    )
+                    await self._rotate()
+                    continue
 
             # Step 4: Phase 1 — Place 10 orders
             await self._phase1(market)

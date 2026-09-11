@@ -37,7 +37,7 @@ class TestSettingsDefaults:
         s = Settings()
         assert s.PRICE_THRESHOLD == Decimal("0.40")
         assert s.MAX_PER_SIDE == Decimal("2.00")
-        assert s.TOTAL_CAP == Decimal("4.00")
+        assert s.TOTAL_CAP == Decimal("20.00")
         assert not isinstance(s.PRICE_THRESHOLD, float)
 
     def test_share_floor_int(self) -> None:

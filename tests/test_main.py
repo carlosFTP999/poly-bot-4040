@@ -19,7 +19,8 @@ class TestSelectExecutor:
         executor = select_executor(settings)
         assert isinstance(executor, DryRunExecutor)
 
-    def test_live_selects_live_executor(self) -> None:
+    @patch("src.executor.LiveClobExecutor._build_client", return_value=MagicMock())
+    def test_live_selects_live_executor(self, _mock) -> None:
         """LIVE_ENABLED=True, DRY_RUN=False → LiveClobExecutor."""
         settings = Settings(
             LIVE_ENABLED=True,
@@ -58,14 +59,13 @@ class TestBalanceCheck:
 
     @pytest.mark.asyncio
     async def test_balance_check_returns_decimal(self) -> None:
-        """balance_check should return a Decimal."""
-        # With py_clob_client unavailable, returns Decimal("0")
-        # In actual implementation with py_clob_client, it returns pUSD balance
-        from src.config import load_settings_from_env
-        settings = load_settings_from_env()
-        # This will return 0 if py_clob_client not available
-        balance = await balance_check()
+        """balance_check should return a Decimal via ClobClient.get_balance_allowance."""
+        mock_client = MagicMock()
+        mock_client.get_balance_allowance.return_value = {"balance": "5.00"}
+        with patch("py_clob_client.client.ClobClient", return_value=mock_client):
+            balance = await balance_check()
         assert isinstance(balance, Decimal)
+        assert balance == Decimal("5.00")
 
     @pytest.mark.asyncio
     async def test_balance_check_default_zero(self) -> None:

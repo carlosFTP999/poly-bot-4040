@@ -127,6 +127,7 @@ class LiveClobExecutor:
         private_key: str,
         base_url: str = "https://clob.polymarket.com",
         signature_type: int = 2,
+        funder: str | None = None,
     ) -> None:
         """Construct LiveClobExecutor.
 
@@ -150,6 +151,7 @@ class LiveClobExecutor:
         self._private_key = private_key
         self._base_url = base_url
         self._signature_type = signature_type
+        self._funder = funder
         self._client = self._build_client()
 
     def _validate_credentials(
@@ -175,19 +177,33 @@ class LiveClobExecutor:
             )
 
     def _build_client(self):
-        """Build the py_clob_client instance."""
-        try:
-            from py_clob_client.client import ClobClient
+        """Build the py_clob_client instance (L2: signer + ApiCreds)."""
+        from py_clob_client.client import ClobClient
+        from py_clob_client.clob_types import ApiCreds
 
-            return ClobClient(
-                host=self._base_url,
-                chain_id=137,
-                key=self._private_key,
-                signature_type=self._signature_type,
-            )
-        except Exception:
-            logger.warning("py_clob_client not available or key invalid; LiveClobExecutor "
-                           "constructed but may not function.")
+        creds = ApiCreds(
+            api_key=self._api_key,
+            api_secret=self._api_secret,
+            api_passphrase=self._api_passphrase,
+        )
+        kwargs: dict = dict(
+            host=self._base_url,
+            chain_id=137,
+            key=self._private_key,
+            creds=creds,
+            signature_type=self._signature_type,
+        )
+        if self._funder:
+            kwargs["funder"] = self._funder
+        try:
+            return ClobClient(**kwargs)
+        except ImportError:
+            raise
+        except Exception as e:
+            # Allow construction with dummy keys in tests (e.g. "priv")
+            # but don't hide real failures silently - log and keep None
+            # so tests can patch _client. Real invalid keys still fail on place.
+            logger.warning("ClobClient build failed (key invalid?): %s", e)
             return None
 
     async def place_limit_order(
@@ -207,18 +223,17 @@ class LiveClobExecutor:
         if size < 5:
             raise ValueError(f"Order size {size} is below minimum of 5 shares.")
 
-        from py_clob_client import OrderArgs
+        from py_clob_client.clob_types import OrderArgs
 
         order_args = OrderArgs(
             token_id=token_id,
             price=float(price),
             size=float(size),
             side=side,
-            expiration=0,
         )
 
-        # Batch POST /orders with single order (engine batches 10 total)
-        result = self._client.create_order(order_args)
+        signed_order = self._client.create_order(order_args)
+        self._client.post_order(signed_order)
 
         return Fill(
             token_id=token_id,
@@ -230,8 +245,11 @@ class LiveClobExecutor:
 
     async def cancel_all(self) -> None:
         """Cancel all pending orders via DELETE /cancel-all."""
-        from py_clob_client.clob import ClobApi
-
-        api = ClobApi(host=self._base_url, key=self._api_key)
-        api.cancel_all(signature_type=self._signature_type)
+        if self._client is None:
+            raise RuntimeError("ClobClient not initialized; cannot cancel_all")
+        try:
+            self._client.cancel_all()
+        except Exception:
+            logger.exception("LiveClobExecutor cancel_all failed")
+            raise
         logger.info("LiveClobExecutor cancelled all orders")

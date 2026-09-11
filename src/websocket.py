@@ -116,7 +116,16 @@ class PrivateWebSocket:
         asyncio.create_task(self._listen())
 
     async def _send_auth(self) -> None:
-        """Send authentication message to the WebSocket."""
+        """Send authentication message to the WebSocket.
+
+        TODO: Verify real CLOB WS auth format against
+        https://docs.polymarket.com — expected fields are ``action`` /
+        ``assets_ids`` / channels ``market`` and ``user``. No conclusive
+        helper found in ``py_clob_client`` (no WS module) and docs
+        unavailable offline, so this keeps the existing payload and relies
+        on the fail-graceful reconnect path. Trading continues deaf until
+        the protocol is confirmed.
+        """
         auth_message = {
             "operation": "auth",
             "apiKey": self._api_key,
@@ -127,7 +136,12 @@ class PrivateWebSocket:
         logger.debug("WebSocket auth sent")
 
     async def _subscribe(self, condition_id: str) -> None:
-        """Subscribe to order_update events for a condition_id."""
+        """Subscribe to order_update events for a condition_id.
+
+        TODO: Same caveat as _send_auth — real protocol likely uses
+        ``action``/``assets_ids``/``market``/``user`` channels per
+        https://docs.polymarket.com. Left fail-graceful until verified.
+        """
         subscribe_message = {
             "operation": "subscribe",
             "markets": [condition_id],
@@ -196,14 +210,14 @@ class PrivateWebSocket:
         await self._sync_orders()
 
     async def _sync_orders(self) -> None:
-        """Sync order state via GET /orders after reconnection.
+        """Sync order state after reconnection (currently no-op).
 
-        Recovers any events missed during the disconnect.
+        A real implementation would call GET /orders via an L2 ClobClient.
+        Left as no-op until a clear API contract exists; reconnection
+        already re-subscribes above. Logged so missed-event recovery is
+        visible.
         """
-        logger.info("Syncing orders via GET /orders after reconnection")
-        # GET /orders call would happen here via HTTP client
-        # In the context of this module, the sync is a placeholder for
-        # the actual HTTP call the engine makes
+        logger.info("Syncing orders via GET /orders after reconnection (no-op)")
 
     async def close(self) -> None:
         """Close the WebSocket connection."""
@@ -216,4 +230,13 @@ class PrivateWebSocket:
     @property
     def is_connected(self) -> bool:
         """Return whether the WebSocket is currently connected."""
-        return self._ws is not None and not self._ws.closed
+        if self._ws is None:
+            return False
+        # websockets >=12 uses State enum; older versions expose .closed
+        try:
+            from websockets.protocol import State
+
+            return getattr(self._ws, "state", None) == State.OPEN
+        except ImportError:
+            pass
+        return not bool(getattr(self._ws, "closed", True))

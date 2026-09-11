@@ -127,18 +127,14 @@ class TestLiveClobExecutor:
                 private_key="",
             )
 
-    def test_live_clob_accepts_all_keys(self) -> None:
+    @patch("src.executor.LiveClobExecutor._build_client", return_value=MagicMock())
+    def test_live_clob_accepts_all_keys(self, _mock) -> None:
         """LiveClobExecutor constructs when all keys provided."""
-        # py_clob_client may not be installed; _build_client
-        # catches ImportError and returns None
-        try:
-            executor = LiveClobExecutor(
-                api_key="key", api_secret="secret",
-                api_passphrase="pass", private_key="priv",
-            )
-            assert isinstance(executor, LiveClobExecutor)
-        except ImportError:
-            pytest.skip("py_clob_client not installed")
+        executor = LiveClobExecutor(
+            api_key="key", api_secret="secret",
+            api_passphrase="pass", private_key="priv",
+        )
+        assert isinstance(executor, LiveClobExecutor)
 
     @pytest.mark.asyncio
     async def test_size_validation(self) -> None:

@@ -51,6 +51,7 @@ def select_executor(settings: Settings) -> Any:
             private_key=settings.POLYMARKET_PRIVATE_KEY,
             base_url=settings.CLOB_BASE_URL,
             signature_type=settings.SIGNATURE_TYPE,
+            funder=settings.POLYMARKET_PROXY_ADDRESS or None,
         )
 
     raise ValueError("Invalid mode selection: exactly one of DRY_RUN/LIVE_ENABLED must be True")
@@ -76,6 +77,7 @@ async def connect_websocket(
         api_key=settings.POLYMARKET_API_KEY,
         api_secret=settings.POLYMARKET_API_SECRET,
         api_passphrase=settings.POLYMARKET_API_PASSPHRASE,
+        base_url=settings.WS_URL,
     )
 
     for attempt in range(1, 4):
@@ -95,34 +97,51 @@ async def connect_websocket(
 async def balance_check() -> Decimal:
     """Check pUSD balance via GET /balance-allowance.
 
-    Uses asset_type=pUSD and signature_type=2.
+    Builds L2 ClobClient and calls get_balance_allowance with
+    BalanceAllowanceParams(asset_type=COLLATERAL, signature_type=...).
 
     Returns:
         Available pUSD balance as Decimal.
-    """
-    try:
-        from py_clob_client.clob import ClobApi
 
-        settings = load_settings_from_env()
-        api = ClobApi(host=settings.CLOB_BASE_URL, key=settings.POLYMARKET_API_KEY)
-        response = api.get_balance_allowance(
-            asset_type="pUSD",
-            signature_type=settings.SIGNATURE_TYPE,
-        )
-        return Decimal(str(response.get("balance", "0")))
-    except ImportError:
-        logger.warning("py_clob_client not available; defaulting balance to 0")
-        return Decimal("0")
+    Raises:
+        Any exception from ClobClient / network (not swallowed in LIVE).
+    """
+    from py_clob_client.client import ClobClient
+    from py_clob_client.clob_types import ApiCreds, AssetType, BalanceAllowanceParams
+
+    settings = load_settings_from_env()
+    creds = ApiCreds(
+        api_key=settings.POLYMARKET_API_KEY,
+        api_secret=settings.POLYMARKET_API_SECRET,
+        api_passphrase=settings.POLYMARKET_API_PASSPHRASE,
+    )
+    kwargs: dict[str, object] = dict(
+        host=settings.CLOB_BASE_URL,
+        chain_id=137,
+        key=settings.POLYMARKET_PRIVATE_KEY,
+        creds=creds,
+        signature_type=settings.SIGNATURE_TYPE,
+    )
+    if settings.POLYMARKET_PROXY_ADDRESS:
+        kwargs["funder"] = settings.POLYMARKET_PROXY_ADDRESS
+    client = ClobClient(**kwargs)
+    params = BalanceAllowanceParams(
+        asset_type=AssetType.COLLATERAL,
+        signature_type=settings.SIGNATURE_TYPE,
+    )
+    response = client.get_balance_allowance(params)
+    # SDK returns dict like {"balance": "123.45", ...}
+    bal = response.get("balance", "0") if isinstance(response, dict) else getattr(response, "balance", "0")
+    return Decimal(str(bal))
 
 
 async def run_bot() -> None:
     """Main bot entry point: load config, select executor, start engine loop."""
+    settings = load_settings_from_env()
     logging.basicConfig(
-        level=logging.INFO,
+        level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-
-    settings = load_settings_from_env()
     logger.info("Bot starting with mode: %s", "LIVE" if settings.LIVE_ENABLED else "DRY_RUN")
 
     executor = select_executor(settings)

@@ -23,7 +23,7 @@ class Settings:
     # Strategy parameters (Decimal for monetary precision)
     PRICE_THRESHOLD: Decimal = Decimal("0.40")
     MAX_PER_SIDE: Decimal = Decimal("2.00")
-    TOTAL_CAP: Decimal = Decimal("4.00")
+    TOTAL_CAP: Decimal = Decimal("20.00")
     SHARE_FLOOR: int = 5
 
     # Mode selection
@@ -33,6 +33,7 @@ class Settings:
     # API configuration
     GAMMA_BASE_URL: str = "https://gamma-api.polymarket.com"
     CLOB_BASE_URL: str = "https://clob.polymarket.com"
+    WS_URL: str = "wss://ws-clob.polymarket.com"
 
     # API credentials (loaded from env)
     POLYMARKET_PRIVATE_KEY: str = ""
@@ -44,6 +45,8 @@ class Settings:
     # Signature type (0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE, 3=DEPOSIT_WALLET)
     # Browser wallets (MetaMask, Phantom) → type 2
     SIGNATURE_TYPE: int = 2
+
+    LOG_LEVEL: str = "INFO"
 
     def __post_init__(self) -> None:
         """Validate mode selection after construction."""
@@ -93,12 +96,18 @@ def load_settings_from_env() -> Settings:
         DRY_RUN=dry_run,
         GAMMA_BASE_URL=os.environ.get("GAMMA_BASE_URL", "https://gamma-api.polymarket.com"),
         CLOB_BASE_URL=os.environ.get("CLOB_BASE_URL", "https://clob.polymarket.com"),
+        WS_URL=os.environ.get("WS_URL", "wss://ws-clob.polymarket.com"),
         POLYMARKET_PRIVATE_KEY=os.environ.get("POLYMARKET_PRIVATE_KEY", ""),
         POLYMARKET_API_KEY=os.environ.get("POLYMARKET_API_KEY", ""),
         POLYMARKET_API_SECRET=os.environ.get("POLYMARKET_API_SECRET", ""),
         POLYMARKET_API_PASSPHRASE=os.environ.get("POLYMARKET_API_PASSPHRASE", ""),
         POLYMARKET_PROXY_ADDRESS=os.environ.get("POLYMARKET_PROXY_ADDRESS", ""),
         SIGNATURE_TYPE=int(os.environ.get("SIGNATURE_TYPE", "2")),
+        LOG_LEVEL=os.environ.get("LOG_LEVEL", "INFO").strip().upper() or "INFO",
+        PRICE_THRESHOLD=Decimal(os.environ.get("PRICE_THRESHOLD", "0.40")),
+        MAX_PER_SIDE=Decimal(os.environ.get("MAX_PER_SIDE", "2.00")),
+        TOTAL_CAP=Decimal(os.environ.get("TOTAL_CAP", "20.00")),
+        SHARE_FLOOR=int(os.environ.get("SHARE_FLOOR", "5")),
     )
 
 
