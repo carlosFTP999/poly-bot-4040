@@ -1,0 +1,44 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Python 3.x, py-sdk (py_clob_client), Polymarket CLOB API v2, Gamma API, WebSocket private
+  Architecture: Hedge accumulation bot with Executor pattern (DryRunExecutor / LiveClobExecutor), batch POST /orders, DELETE /cancel-all rotation every 300s
+  Testing: Unit tests for market, executor, engine modules (pytest-based, planned but no config yet)
+  Style: Decimal for monetary precision, async/await for API calls, dependency injection for testability
+
+strict_tdd: false
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns
+    tdd: false
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
+
+projects:
+  - path: "."
+    stack: "Python (py-sdk, py_clob_client)"
+    test_command: "—"
+    framework: "—"
+    coverage_command: "—"
+    quality_tools:
+      linter: "—"
+      type_checker: "—"
+      formatter: "—"

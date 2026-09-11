@@ -1,0 +1,5 @@
+.atl/
+.codegraph/
+__pycache__/
+*.pyc
+.env
