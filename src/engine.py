@@ -30,7 +30,7 @@ class Engine:
     # Optional pre-warm: this many seconds before window end, probe next window.
     PREWARM_BEFORE_END_S = 5.0
     # Max seconds into window to enter; otherwise skip.
-    MAX_LATE_S = 10.0
+    MAX_LATE_S = 15.0
 
     def __init__(
         self,
