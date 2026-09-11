@@ -399,12 +399,12 @@ src/
 
 ### Límites de la API
 
-| Endpoint | Límite | Ventana |
-|----------|--------|---------|
-| `POST /orders` (batch) | ~2,000 solicitudes | 10 segundos |
-| `DELETE /orders` (cancel batch) | ~2,000 solicitudes | 10 segundos |
-| `DELETE /cancel-all` (cancel todo) | ~250 solicitudes | 10 segundos |
-| Global (Cloudflare) | ~15,000/10s | Por IP |
+| Endpoint                           | Límite             | Ventana     |
+| ---------------------------------- | ------------------ | ----------- |
+| `POST /orders` (batch)             | ~2,000 solicitudes | 10 segundos |
+| `DELETE /orders` (cancel batch)    | ~2,000 solicitudes | 10 segundos |
+| `DELETE /cancel-all` (cancel todo) | ~250 solicitudes   | 10 segundos |
+| Global (Cloudflare)                | ~15,000/10s        | Por IP      |
 
 > [!note] Impacto en nuestro bot
 > Con 10 órdenes en Phase 1 (batch de 10) por ventana,
@@ -543,19 +543,19 @@ Los valores numéricos son `Decimal` para precisión monetaria; los enteros son 
 
 ### Parámetros de entorno
 
-| Parámetro | Tipo | Default | Descripción |
-|-----------|------|---------|-------------|
-| **LIVE_ENABLED** | bool | False | Habilitar modo live (requiere claves) |
-| **DRY_RUN** | bool | True | Modo paper trading (predeterminado) |
-| **GAMMA_BASE_URL** | str | gamma-api.polymarket.com | URL base de la Gamma API |
-| **CLOB_BASE_URL** | str | clob.polymarket.com | URL base de la CLOB API |
-| **POLYMARKET_PRIVATE_KEY** | str | None | Clave privada para órdenes live |
-| **POLYMARKET_API_KEY** | str | None | API key para autenticación |
-| **POLYMARKET_API_SECRET** | str | None | API secret |
-| **POLYMARKET_API_PASSPHRASE** | str | None | Passphrase de la API |
-| **POLYMARKET_PROXY_ADDRESS** | str | None | Dirección del proxy de depósito |
-| **FUNDER** | str | None | Funder wallet |
-| **SIGNATURE_TYPE** | int | 3 | Tipo de firma: 0=EOA estándar, 1=POLY_PROXY, 2=GNOSIS_SAFE, 3=DEPOSIT_WALLET (EIP-1271 con ERC-7739 wrapper) |
+| Parámetro                     | Tipo | Default                  | Descripción                                                                                                  |
+| ----------------------------- | ---- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| **LIVE_ENABLED**              | bool | False                    | Habilitar modo live (requiere claves)                                                                        |
+| **DRY_RUN**                   | bool | True                     | Modo paper trading (predeterminado)                                                                          |
+| **GAMMA_BASE_URL**            | str  | gamma-api.polymarket.com | URL base de la Gamma API                                                                                     |
+| **CLOB_BASE_URL**             | str  | clob.polymarket.com      | URL base de la CLOB API                                                                                      |
+| **POLYMARKET_PRIVATE_KEY**    | str  | None                     | Clave privada para órdenes live                                                                              |
+| **POLYMARKET_API_KEY**        | str  | None                     | API key para autenticación                                                                                   |
+| **POLYMARKET_API_SECRET**     | str  | None                     | API secret                                                                                                   |
+| **POLYMARKET_API_PASSPHRASE** | str  | None                     | Passphrase de la API                                                                                         |
+| **POLYMARKET_PROXY_ADDRESS**  | str  | None                     | Dirección del proxy de depósito                                                                              |
+| **FUNDER**                    | str  | None                     | Funder wallet                                                                                                |
+| **SIGNATURE_TYPE**            | int  | 3                        | Tipo de firma: 0=EOA estándar, 1=POLY_PROXY, 2=GNOSIS_SAFE, 3=DEPOSIT_WALLET (EIP-1271 con ERC-7739 wrapper) |
 
 ---
 

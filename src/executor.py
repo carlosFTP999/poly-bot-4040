@@ -207,16 +207,14 @@ class LiveClobExecutor:
         if size < 5:
             raise ValueError(f"Order size {size} is below minimum of 5 shares.")
 
-        from py_clob_client.types import OrderArgs
+        from py_clob_client import OrderArgs
 
         order_args = OrderArgs(
-            price=str(price),
-            size=str(size),
-            side=side,
             token_id=token_id,
-            order_type="GTC",
+            price=float(price),
+            size=float(size),
+            side=side,
             expiration=0,
-            signature_type=self._signature_type,
         )
 
         # Batch POST /orders with single order (engine batches 10 total)

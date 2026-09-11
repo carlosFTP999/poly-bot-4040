@@ -29,6 +29,8 @@ class Engine:
     DISCOVER_RETRY_INTERVAL_S = 0.5
     # Optional pre-warm: this many seconds before window end, probe next window.
     PREWARM_BEFORE_END_S = 5.0
+    # Max seconds into window to enter; otherwise skip.
+    MAX_LATE_S = 10.0
 
     def __init__(
         self,
@@ -84,6 +86,16 @@ class Engine:
             market = await self._discover_with_retry(window_ts)
             if market is None:
                 logger.info("No market found for window; rotating +300s")
+                await self._rotate()
+                continue
+
+            # Detect late entry: if we're more than MAX_LATE_S into the window, skip
+            seconds_into_window = self._now() - window_ts
+            if seconds_into_window > self.MAX_LATE_S:
+                logger.warning(
+                    "Entered %ds into window (max %ds); skipping. Next window at %ds",
+                    seconds_into_window, self.MAX_LATE_S, window_ts + 300,
+                )
                 await self._rotate()
                 continue
 
@@ -230,7 +242,7 @@ class Engine:
         window_ts_raw = self._now()
         window_ts = (window_ts_raw // 300) * 300
         window_end = window_ts + 300
-        remaining = max(0, window_end - window_ts_raw)
+        remaining = max(0, window_end - self._now())
 
         logger.info("Waiting %d seconds for window expiry", remaining)
         prewarm_at = self.PREWARM_BEFORE_END_S
