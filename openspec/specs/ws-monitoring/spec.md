@@ -2,13 +2,17 @@
 
 ## Purpose
 
-Maintain a persistent private WebSocket connection to Polymarket for real-time `order_update` events (~88ms latency), with automatic reconnection and order state synchronization.
+Maintain a persistent private WebSocket connection to Polymarket (`WS_URL`, default `wss://ws-clob.polymarket.com`) for real-time `order_update` events (~88ms latency), with automatic reconnection and order state synchronization.
 
 ## Requirements
 
+### Requirement: WebSocket URL Configuration
+
+`WS_URL` SHALL be configurable via environment (`WS_URL`, default `wss://ws-clob.polymarket.com`) and consumed by `PrivateWebSocket` / `connect_websocket`. `LOG_LEVEL` (default `INFO`) controls `logging.basicConfig` level.
+
 ### Requirement: Private WebSocket Authentication
 
-The system SHALL authenticate the WebSocket connection using `apiKey`, `secret`, and `passphrase` from environment configuration. Auth MUST occur before subscribing to any market.
+The system SHALL authenticate the WebSocket connection using `apiKey`, `secret`, and `passphrase` from environment configuration. Auth MUST occur before subscribing to any market. Connection URL is `WS_URL`.
 
 #### Scenario: Successful auth
 

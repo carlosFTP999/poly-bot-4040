@@ -52,19 +52,35 @@ After Phase 2 completes, the engine MUST advance the window by +300s and restart
 - WHEN rotation occurs
 - THEN the engine computes next window 1694000700 and begins discovery
 
+### Requirement: Late Entry Guard (MAX_LATE_S)
+
+If the engine enters a window more than `MAX_LATE_S = 15s` after `window_ts`, it MUST skip that window and rotate to `window_ts + 300` without placing orders.
+
+#### Scenario: Late entry skip
+
+- GIVEN `now - window_ts = 20s` and `MAX_LATE_S = 15s`
+- WHEN the engine evaluates entry
+- THEN it logs a warning and rotates without Phase 1
+
+#### Scenario: On-time entry
+
+- GIVEN `now - window_ts = 10s`
+- WHEN the engine evaluates entry
+- THEN Phase 1 proceeds normally
+
 ### Requirement: Balance Check Before Phase 1
 
-Before placing orders, the engine MUST verify pUSD balance >= $4.00 via `GET /balance-allowance` with `asset_type=pUSD` and `signature_type=3`. If balance is insufficient, the engine MUST skip the window and rotate.
+Before placing orders, the engine MUST verify pUSD balance >= `TOTAL_CAP` (20.00) via L2 `ClobClient.get_balance_allowance(BalanceAllowanceParams(asset_type=COLLATERAL, signature_type=...))` (`GET /balance-allowance` with `asset_type=pUSD`). If balance is insufficient, the engine MUST skip the window and rotate. In `DRY_RUN` the check is skipped (assumed sufficient).
 
 #### Scenario: Sufficient balance
 
-- GIVEN pUSD balance is $5.00
+- GIVEN pUSD balance is $25.00 (>= TOTAL_CAP 20.00)
 - WHEN the engine checks balance before Phase 1
 - THEN Phase 1 proceeds with order placement
 
 #### Scenario: Insufficient balance
 
-- GIVEN pUSD balance is $3.50
+- GIVEN pUSD balance is $15.00 (< TOTAL_CAP 20.00)
 - WHEN the engine checks balance before Phase 1
 - THEN Phase 1 is skipped and the engine rotates to the next window
 

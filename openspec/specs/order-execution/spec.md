@@ -68,6 +68,10 @@ Every order MUST specify a `size` of at least 5 shares (Polymarket minimum for G
 - WHEN `cancel_all()` is called
 - THEN resting orders count is 0 and `cancelled_count` is 3
 
+### Requirement: L2 Executor (LiveClobExecutor)
+
+`LiveClobExecutor` MUST be an L2 executor built on `py_clob_client.ClobClient` with `host=CLOB_BASE_URL`, `chain_id=137`, `key=POLYMARKET_PRIVATE_KEY`, `creds=ApiCreds(...)`, `signature_type=SIGNATURE_TYPE`, and optional `funder=POLYMARKET_PROXY_ADDRESS`. Order placement SHALL use `OrderArgs` + `create_order`/`post_order`; cancel SHALL use `cancel_all()` (`DELETE /cancel-all`).
+
 ### Requirement: LiveClobExecutor Key Validation
 
 `LiveClobExecutor` MUST fail construction if `LIVE_ENABLED=true` but any required key (api_key, secret, passphrase, private_key) is missing.

@@ -8,7 +8,7 @@ Load strategy parameters and environment variables into typed configuration, usi
 
 ### Requirement: Strategy Parameters as Decimal
 
-All monetary strategy parameters MUST be loaded as `Decimal` values: `PRICE_THRESHOLD` (0.40), `MAX_PER_SIDE` (2.00), `TOTAL_CAP` (4.00). `SHARE_FLOOR` MUST be `int` (5).
+All monetary strategy parameters MUST be loaded as `Decimal` values: `PRICE_THRESHOLD` (0.40), `MAX_PER_SIDE` (2.00), `TOTAL_CAP` (20.00). `SHARE_FLOOR` MUST be `int` (5).
 
 #### Scenario: Decimal precision
 
@@ -24,7 +24,7 @@ All monetary strategy parameters MUST be loaded as `Decimal` values: `PRICE_THRE
 
 ### Requirement: Environment Variable Loading
 
-The system SHALL load configuration from environment variables with sensible defaults. Required env vars: `LIVE_ENABLED` (bool, default False), `DRY_RUN` (bool, default True), `GAMMA_BASE_URL`, `CLOB_BASE_URL`.
+The system SHALL load configuration from environment variables with sensible defaults. Required env vars: `LIVE_ENABLED` (bool, default False), `DRY_RUN` (bool, default True), `GAMMA_BASE_URL`, `CLOB_BASE_URL`, `WS_URL` (default `wss://ws-clob.polymarket.com`), `LOG_LEVEL` (default `INFO`, normalized to upper).
 
 #### Scenario: Default dry-run mode
 
@@ -56,13 +56,29 @@ The system MUST support two mutually exclusive modes: `DRY_RUN=True` uses `DryRu
 
 ### Requirement: API Key Types
 
-`POLYMARKET_PRIVATE_KEY`, `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`, and `POLYMARKET_PROXY_ADDRESS` MUST be loaded as strings. `SIGNATURE_TYPE` MUST be `int` (default 3).
+`POLYMARKET_PRIVATE_KEY`, `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`, and `POLYMARKET_PROXY_ADDRESS` MUST be loaded as strings. `SIGNATURE_TYPE` MUST be `int` (default 2 — `GNOSIS_SAFE` for browser wallets; `0=EOA`, `1=POLY_PROXY`, `3=DEPOSIT_WALLET`).
 
 #### Scenario: Signature type default
 
 - GIVEN `SIGNATURE_TYPE` is not set in environment
 - WHEN the config is loaded
-- THEN `SIGNATURE_TYPE` is `int(3)`
+- THEN `SIGNATURE_TYPE` is `int(2)`
+
+### Requirement: Logging and WebSocket URL
+
+`LOG_LEVEL` MUST be loaded as upper-cased string (default `INFO`) and `WS_URL` as string (default `wss://ws-clob.polymarket.com`). Both SHALL be overridable via environment.
+
+#### Scenario: WS_URL default
+
+- GIVEN `WS_URL` is not set in environment
+- WHEN the config is loaded
+- THEN `WS_URL` is `wss://ws-clob.polymarket.com`
+
+#### Scenario: LOG_LEVEL normalization
+
+- GIVEN `LOG_LEVEL=debug` in environment
+- WHEN the config is loaded
+- THEN `LOG_LEVEL` is `DEBUG`
 
 ### Requirement: Config Immutability
 
