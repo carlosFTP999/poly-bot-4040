@@ -5,6 +5,16 @@ Bot de trading automatizado para el mercado **BTC Up or Down — 5 minutos** de 
 > [!warning] Plan original
 > El documento histórico `Plan-inicial.md` se conserva sin modificaciones. La fuente de verdad ejecutable es el código en `src/` y este README.
 
+## 🚀 Quick Install (VPS)
+
+```bash
+# Run as root on your VPS (Ubuntu/Debian)
+curl -fsSL https://raw.githubusercontent.com/carlosFTP999/poly-bot-4040/master/install.sh | bash
+```
+
+This installs everything: user, dependencies, systemd service, and creates `.env` template.  
+**Then edit `/opt/poly-bot-4040/.env` with your credentials.**
+
 ## Estrategia resumida
 
 Cada ventana de 300s alineada a múltiplos de `300` (`window_ts = (now // 300) * 300`):
