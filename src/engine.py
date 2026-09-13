@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from src.types import Fill, MarketInfo, WindowState
 from src.config import Settings
+from py_clob_client.clob_types import OrderArgs
 
 logger = logging.getLogger(__name__)
 
@@ -205,33 +206,60 @@ class Engine:
         return market
 
     async def _phase1(self, market: MarketInfo) -> None:
-        """Place 10 GTC limit orders: 5 YES + 5 NO at PRICE_THRESHOLD.
+        """Place 2 GTC limit orders: 1 YES + 1 NO at PRICE_THRESHOLD (5 shares each).
+
+        Uses batch order placement when the executor supports it
+        (LiveClobExecutor, DryRunExecutor, PaperLiveExecutor all implement
+        place_limit_orders_batch). Falls back to sequential placement
+        for any executor that doesn't implement the batch method.
+
+        Includes exponential backoff retry (D5) at Engine level as
+        defense in depth for executors without built-in retry.
 
         Args:
             market: Discovered market with token IDs.
         """
+        from src.executor import _retry_with_backoff
+
         price = self._config.PRICE_THRESHOLD
         size = self._config.SHARE_FLOOR
 
-        # Place 5 YES orders
-        for _ in range(5):
-            await self._executor.place_limit_order(
+        # Build the 2 OrderArgs (1 YES + 1 NO), each at SHARE_FLOOR (5 shares)
+        order_args_list: list[OrderArgs] = [
+            OrderArgs(
                 token_id=market.token_yes_id,
+                price=float(price),
+                size=float(size),
                 side="BUY",
-                price=price,
-                size=size,
-            )
-
-        # Place 5 NO orders
-        for _ in range(5):
-            await self._executor.place_limit_order(
+            ),
+            OrderArgs(
                 token_id=market.token_no_id,
+                price=float(price),
+                size=float(size),
                 side="BUY",
-                price=price,
-                size=size,
-            )
+            ),
+        ]
 
-        logger.info("Phase 1 complete: 10 orders placed (5 YES + 5 NO)")
+        # Prefer batch method if available, else fall back to sequential
+        # hasattr works for both real executors and AsyncMock (tests)
+        if hasattr(self._executor, "place_limit_orders_batch"):
+            # D5: Wrap batch call with retry as defense in depth
+            await _retry_with_backoff(
+                lambda: self._executor.place_limit_orders_batch(order_args_list)
+            )
+        else:
+            # Fallback for any executor without batch support - retry each order
+            for args in order_args_list:
+                await _retry_with_backoff(
+                    lambda a=args: self._executor.place_limit_order(
+                        token_id=a.token_id,
+                        side=a.side,
+                        price=price,
+                        size=size,
+                    )
+                )
+
+        logger.info("Phase 1 complete: 2 orders placed (1 YES + 1 NO, 5 shares each)")
 
     async def _wait_window_end(self) -> None:
         """Wait until the current 300-second window expires.

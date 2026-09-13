@@ -2,7 +2,7 @@
 
 ## Technical Approach
 
-Modular async Python bot implementing a hedge accumulation strategy on Polymarket's BTC 5-min UP/DOWN markets. The system discovers markets via Gamma API, places 10 GTC limit orders (5 YES + 5 NO at $0.40) in a single batch, monitors fills via private WebSocket, waits the full 300s window, cancels all pending orders, and rotates to the next window. Executor Protocol enables dependency injection for testability (DryRunExecutor for paper trading, LiveClobExecutor for live trading).
+Modular async Python bot implementing a hedge accumulation strategy on Polymarket's BTC 5-min UP/DOWN markets. The system discovers markets via Gamma API, places 2 GTC limit orders (1 YES + 1 NO at $0.40) in a single batch, monitors fills via private WebSocket (auth+subscribe combined frame), waits the full 300s window, cancels all pending orders, and rotates to the next window. Executor Protocol enables dependency injection for testability (DryRunExecutor for paper trading, LiveClobExecutor for live trading, PaperLiveExecutor for zero-risk live infrastructure testing).
 
 ## Architecture Decisions
 
@@ -13,7 +13,10 @@ Modular async Python bot implementing a hedge accumulation strategy on Polymarke
 | **Executor Pattern** | Protocol with DI, not inheritance hierarchy | Abstract base class | Python Protocol provides structural typing; simpler mocking |
 | **Async/Await** | Full async for all API calls | Sync with threading | WebSocket requires async; unified model simplifies code |
 | **State Management** | No persistent state (first iteration) | SQLite/JSON | Keeps scope minimal; orphaned orders handled via cancel-all rotation |
-| **Rate Limit Handling** | Exponential backoff with per-tier tracking | Fixed delay | Respects separate order/cancel buckets; 429/425/503 specific handling |
+| **Rate Limit Handling** | Exponential backoff (1s/2s/4s) with Retry-After extraction | Fixed delay | Respects separate order/cancel buckets; 429/425/503 specific handling |
+| **Clock Synchronization** | Offset-based via CLOB /time + 5min recalibration + 401 retry | Local `time.time()` | Prevents timestamp auth failures; auto-recalibrate on 401 |
+| **WebSocket Auth** | Combined auth+subscribe frame `{"auth":{...},"type":"user","markets":[...]}` | Separate auth + subscribe | Single frame reduces connection setup latency |
+| **Order Batch Size** | 2 orders (1 YES + 1 NO) per window | 10 orders (5 YES + 5 NO) | Reduced capital exposure; TOTAL_CAP=4.00 |
 
 ## Module Dependency Graph
 
@@ -38,18 +41,17 @@ Window Start (t=0s)
 config.Settings ─────────────────────────────┐
     │                                         │
     ▼                                         ▼
-market.discover(client) ──→ MarketInfo ──→ websocket.connect(auth)
+market.discover(client) ──→ MarketInfo ──→ websocket.connect(auth+subscribe)
     │                                         │
     │                                         ▼
-    │                                   subscribe(condition_id)
-    │                                         │
+    │                                   _subscribe_initial() combined frame
+    │                                   PING/PONG heartbeat every 10s
     ▼                                         ▼
-engine.balance_check() ──→ pUSD >= $4.00? ──→ executor.place_limit_order ×10
+engine.balance_check() ──→ pUSD >= $4.00? ──→ executor.place_limit_order ×2 (1 YES + 1 NO)
     │                                         │
     │                                         ▼
     │                                   WebSocket order_update events
     │                                   (fill tracking)
-    │                                         │
     ▼                                         ▼
 asyncio.sleep(window_end - now) ──────── executor.cancel_all()
     │
@@ -66,7 +68,7 @@ window_ts += 300 → next window
 | `src/market.py` | Create | current_window_ts(), discover(client), token extraction |
 | `src/executor.py` | Create | Executor Protocol, DryRunExecutor, LiveClobExecutor |
 | `src/engine.py` | Create | Engine class with injectable deps, run_cycle() |
-| `src/websocket.py` | Create | WebSocketClient: connect, subscribe, reconnect, process events |
+| `src/websocket.py` | Create | WebSocketClient: auth+subscribe combined frame, _subscribe_initial(), PING/PONG heartbeat, reconnect + _sync_orders (L2 GET /orders), process events |
 | `src/main.py` | Create | Entry point, config load, executor selection, engine loop |
 | `src/__init__.py` | Create | Package marker |
 
@@ -113,12 +115,12 @@ class Engine:
 
 | Error Type | Handling | Recovery |
 |------------|----------|----------|
-| **429 Rate Limit** | Exponential backoff (1s, 2s, 4s) with Retry-After header | Retry up to 3x per call |
-| **425 Too Early** | Wait 2s, retry | Retry up to 3x |
-| **503 Service Unavailable** | Wait 5s, retry | Retry up to 3x |
-| **401 Auth Failure** | Log error, stop bot | Manual intervention |
+| **429 Rate Limit** | Exponential backoff (1s, 2s, 4s) with Retry-After header extraction | Retry up to 3x per call |
+| **425 Too Early** | Exponential backoff (1s, 2s, 4s) | Retry up to 3x |
+| **503 Service Unavailable** | Exponential backoff (1s, 2s, 4s) | Retry up to 3x |
+| **401 Auth / Timestamp** | Clock re-sync via `_post_with_clock_retry`, one retry | Automatic re-sync |
 | **400 Bad Request** | Log order details, skip batch | Continue window rotation |
-| **WebSocket Disconnect** | Reconnect + re-subscribe + GET /orders sync | 3 attempts then stop |
+| **WebSocket Disconnect** | Reconnect + _subscribe_initial() + GET /orders L2 sync | 3 attempts then stop |
 | **Balance < $4.00** | Skip window, rotate +300s | Automatic next window |
 | **Market Not Found** | Rotate +300s, retry next window | Automatic retry |
 
@@ -130,21 +132,22 @@ class Engine:
 | **Unit - market** | window_ts calculation, token extraction, injectable client | Mock client returning fixture JSON |
 | **Unit - executor** | DryRunExecutor determinism, LiveClobExecutor key validation | Mock py_clob_client; no network |
 | **Unit - engine** | Full cycle with mocked deps; wait always 300s; balance check | Inject now=lambda, discover=lambda, executor=Mock |
-| **Unit - websocket** | Reconnection logic, event parsing, subscription | Mock WebSocket server |
+| **Unit - websocket** | Reconnection logic, event parsing, auth+subscribe frame, _subscribe_initial(), PING/PONG heartbeat, _sync_orders | Mock WebSocket server |
+| **Unit - clock_sync** | Offset calibration, 5min recheck, force_recalibrate, 401 retry | Mock httpx |
 | **Integration** | Engine + executor + market (mocked ws) | Simulated window lifecycle |
 | **E2E (manual)** | DryRunExecutor mode, live mode with small balance | Real Gamma API, paper trading |
 
-**What to mock**: HTTP clients, WebSocket connections, py_clob_client, time functions.
+**What to mock**: HTTP clients, WebSocket connections, py_clob_client, time functions, httpx.
 **What to test with real calls**: Only manual E2E with DryRunExecutor.
 
 ## External Library Integration Points
 
 | Library | Module | Integration |
 |---------|--------|-------------|
-| `py_clob_client` | executor.py (LiveClobExecutor) | Order placement, cancel-all, balance check |
-| `websockets` | websocket.py | Private WS connection, auth, subscribe |
-| `httpx` | market.py | Async HTTP to Gamma API |
-| `asyncio` | engine.py, main.py | Event loop, sleep, task coordination |
+| `py_clob_client` | executor.py (LiveClobExecutor) | Order placement (OrderArgs + OrderType.GTC), cancel-all, balance check, batch POST /orders |
+| `websockets` | websocket.py | Private WS connection, auth+subscribe combined frame, PING/PONG heartbeat |
+| `httpx` | market.py, clock_sync.py | Async HTTP to Gamma API, sync HTTP to CLOB /time |
+| `asyncio` | engine.py, main.py, websocket.py | Event loop, sleep, task coordination, heartbeat scheduling |
 | `decimal` | config.py, types.py | All monetary values |
 | `os` | config.py | Environment variable loading |
 
@@ -158,7 +161,7 @@ No migration required. Fresh project with no existing code. Feature flag: `LIVE_
 
 ## Open Questions
 
-- [ ] Exact Gamma API response format for `tokens` array (confirm field names)
-- [ ] WebSocket auth message format (confirm `apiKey`/`secret`/`passphrase` fields)
-- [ ] Rate limit headers: confirm `Poly-RateLimit-*` header names
-- [ ] py-sdk `get_balance()` method signature (confirm parameters)
+- [x] ~~Exact Gamma API response format for `tokens` array~~ — Confirmed: `clobTokenIds` + `outcomes` as JSON-stringified arrays
+- [x] ~~WebSocket auth message format~~ — Confirmed: `{"auth":{...},"type":"user","markets":[...]}` combined frame
+- [x] ~~Rate limit headers~~ — Confirmed: Retry-After extraction from error messages
+- [x] ~~py-sdk `get_balance()` method signature~~ — Confirmed: `get_balance_allowance(BalanceAllowanceParams)` with `AssetType.COLLATERAL`

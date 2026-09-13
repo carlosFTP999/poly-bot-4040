@@ -19,8 +19,8 @@ Desarrollar un bot de trading automatizado para el mercado **BTC 5-min UP/DOWN**
 
 ### Comportamiento teorico
 **Phase 1**: 
-1. Cuando comience la ventana de mercado el bot enviará en una sola petición 10 órdenes límites GTC (5 - YES a $0.40 y 5 - NO a $0.40)
-2. Se esperan los reportes de ejecución vía WebSocket de las 10 órdenes.
+1. Cuando comience la ventana de mercado el bot enviará en una sola petición 2 órdenes límites GTC (1 YES a $0.40 con 5 shares + 1 NO a $0.40 con 5 shares)
+2. Se esperan los reportes de ejecución vía WebSocket de las 2 órdenes.
 3. El bot **espera SIEMPRE** hasta el final de la ventana de 5 minutos, independientemente de cuántas órdenes se hayan ejecutado.
 
 **Phase 2** (siempre al final de la ventana):
@@ -187,9 +187,9 @@ INICIO VENTANA (t=0s, múltiplo 300s)
 │   ├── [No encontrado] → Rotar +300s → volver a INICIO VENTANA
 │   └── [Encontrado] → Conectar WebSocket Privado
 │
-├── PHASE 1 — Enviar 10 órdenes GTC límite de compra (1 batch)
-│   ├── 5 órdenes YES a $0.40
-│   ├── 5 órdenes NO a $0.40
+├── PHASE 1 — Enviar 2 órdenes GTC límite de compra (1 batch)
+│   ├── 1 orden YES a $0.40 (5 shares)
+│   ├── 1 orden NO a $0.40 (5 shares)
 │   └── Batch POST /orders (una sola petición)
 │
 ├── ESPERAR FIN DE VENTANA (SIEMPRE)
@@ -221,7 +221,7 @@ flowchart TD
     
     Discover -- Encontrado --> ConnectWS[Conectar WebSocket Privado]
     
-    ConnectWS --> Phase1["PHASE 1: Enviar 10 órdenes GTC\n5 YES a $0.40 + 5 NO a $0.40\n(batch POST /orders)"]
+    ConnectWS --> Phase1["PHASE 1: Enviar 2 órdenes GTC\n1 YES a $0.40 (5 shares) + 1 NO a $0.40 (5 shares)\n(batch POST /orders)"]
     
     Phase1 --> WaitForExpiry[Esperar fin de ventana\n5 min — SIEMPRE]
     
@@ -243,9 +243,9 @@ flowchart TD
         direction TB
         
         subgraph "FASE 1 — Inicio (t=0s)"
-             P1["10 órdenes GTC límite\n(1 batch POST /orders)"]
-             P1_YES["5 YES a $0.40"]
-             P1_NO["5 NO a $0.40"]
+             P1["2 órdenes GTC límite\n(1 batch POST /orders)"]
+             P1_YES["1 YES a $0.40 (5 shares)"]
+             P1_NO["1 NO a $0.40 (5 shares)"]
             P1 --> P1_YES
             P1 --> P1_NO
         end
@@ -281,7 +281,7 @@ stateDiagram-v2
 
     WebSocketConnected --> SendOrders1: Iniciar Phase 1
 
-     SendOrders1: Enviar 10 órdenes GTC\n5 YES a $0.40 + 5 NO a $0.40\n(batch POST /orders)
+     SendOrders1: Enviar 2 órdenes GTC\n1 YES a $0.40 (5 shares) + 1 NO a $0.40 (5 shares)\n(batch POST /orders)
 
      SendOrders1 --> WaitForExpiry: Esperar fin de ventana
 
@@ -371,7 +371,7 @@ src/
 
 | Endpoint | API | Host | Método | Query params |
 |---|---|---|---|---|
-| `/balance-allowance` | **CLOB** (oficial) | `clob.polymarket.com` | `GET` | `asset_type=pUSD`, `signature_type=3` |
+| `/balance-allowance` | **CLOB** (oficial) | `clob.polymarket.com` | `GET` | `asset_type=pUSD`, `signature_type=2` |
 | `/v1/account/balances` | **Perps** (oficial) | `api.perpetuals.polymarket.com` | `GET` | — |
 
 **Respuesta CLOB**: `{"balance": "1000.00", "allowance": "1000.00"}` (strings).
@@ -474,7 +474,7 @@ async def api_call_with_retry(func, max_retries=3):
 
 Antes de ejecutar en vivo, verificar:
 
-- [ ] **Saldos**: verificación de **pUSD** >= $4.00 antes de cada ventana (`GET /balance-allowance` en CLOB, `asset_type=pUSD`, `signature_type=3`). Si saldo es USDC.e, wrappear a pUSD primero via `CollateralOnramp`.
+- [ ] **Saldos**: verificación de **pUSD** >= $4.00 antes de cada ventana (`GET /balance-allowance` en CLOB, `asset_type=pUSD`, `signature_type=2`). Si saldo es USDC.e, wrappear a pUSD primero via `CollateralOnramp`.
 - [ ] **Sincronización**: reloj sincronizado con timestamp del servidor Polymarket.
 - [ ] **Cancelación explícita**: el bot cancela órdenes GTC via `DELETE /cancel-all` después del cierre.
 - [ ] **Verificación post-cancelación (opcional, no bloqueante)**: `GET /orders` en background para confirmar que no quedan órdenes vivas; si algo queda, el siguiente ciclo lo detectará (órdenes huérfanas). No debe retrasar la rotación.
@@ -554,8 +554,8 @@ Los valores numéricos son `Decimal` para precisión monetaria; los enteros son 
 | **POLYMARKET_API_SECRET**     | str  | None                     | API secret                                                                                                   |
 | **POLYMARKET_API_PASSPHRASE** | str  | None                     | Passphrase de la API                                                                                         |
 | **POLYMARKET_PROXY_ADDRESS**  | str  | None                     | Dirección del proxy de depósito                                                                              |
-| **FUNDER**                    | str  | None                     | Funder wallet                                                                                                |
-| **SIGNATURE_TYPE**            | int  | 3                        | Tipo de firma: 0=EOA estándar, 1=POLY_PROXY, 2=GNOSIS_SAFE, 3=DEPOSIT_WALLET (EIP-1271 con ERC-7739 wrapper) |
+| **FUNDER**                    | str  | None                     | Funder wallet — quién paga gas (puede ser distinto de POLYMARKET_PROXY_ADDRESS)                                |
+| **SIGNATURE_TYPE**            | int  | 2                        | Tipo de firma: 0=EOA estándar, 1=POLY_PROXY, 2=GNOSIS_SAFE (browser wallets: MetaMask, Phantom), 3=DEPOSIT_WALLET (EIP-1271 con ERC-7739 wrapper) |
 
 ---
 
@@ -563,7 +563,7 @@ Los valores numéricos son `Decimal` para precisión monetaria; los enteros son 
 
 El proyecto utiliza tests unitarios para validar cada componente de forma aislada:
 
-- **market tests**: `discover` y `current_window_ts(now) = (now // 300) * 300` aceptan `client`
+- **market tests**: `current_window_ts(now: int) -> int` calcula `(now // 300) * 300` sin dependencias externas; `discover` acepta `client`
   callable que retorna JSON mockeado; se verifica que solo opera en la ventana actual (múltiplo exacto de 300).
 - **executor tests**: `DryRunExecutor` es determinista y sin red; `LiveClobExecutor` se testea
   con mocks de `py_clob_client`.

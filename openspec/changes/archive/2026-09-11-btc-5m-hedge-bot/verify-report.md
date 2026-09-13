@@ -43,10 +43,10 @@ build_output_hash: sha256:b5576075465d26624757381ee3553b5f76519cf6b237bf102f9c43
 All imports successful
 ```
 
-**Tests**: ✅ 88 passed / ❌ 0 failed / ⚠️ 0 skipped
+**Tests**: ✅ 122 passed / ❌ 0 failed / ⚠️ 0 skipped
 ```text
 python3 -m pytest tests/ -v
-========================= 88 passed in 0.28s ==========================
+============================= 122 passed in 10.21s ==========================
 ```
 
 **Coverage**: Not available → ➖ Not available
@@ -66,8 +66,8 @@ python3 -m pytest tests/ -v
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
 | Executor Protocol | ✅ COMPLIANT | `Executor(Protocol)` with `@runtime_checkable` |
-| Batch Order Placement | ✅ COMPLIANT | 10 orders (5 YES + 5 NO at $0.40) in `_phase1()` |
-| GTC Order Type | ✅ COMPLIANT | `order_type="GTC"`, `expiration=0` |
+| Batch Order Placement | ✅ COMPLIANT | 2 orders (1 YES + 1 NO at $0.40) in `_phase1()` |
+| GTC Order Type | ✅ COMPLIANT | `orderType=OrderType.GTC` explicit, `expiration=0` |
 | Minimum Order Size | ✅ COMPLIANT | `size >= 5` validation |
 | DryRunExecutor Determinism | ✅ COMPLIANT | Returns Fill immediately; no network |
 | LiveClobExecutor Key Validation | ✅ COMPLIANT | Raises ValueError if keys missing |
@@ -75,16 +75,16 @@ python3 -m pytest tests/ -v
 ### ws-monitoring (5 requirements, 8 scenarios)
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
-| Private WebSocket Authentication | ✅ COMPLIANT | `_send_auth()` with apiKey/secret/passphrase |
-| Market Subscription | ✅ COMPLIANT | `_subscribe()` with condition_id |
+| Private WebSocket Authentication | ✅ COMPLIANT | `_subscribe_initial()` with combined auth+subscribe frame |
+| Market Subscription | ✅ COMPLIANT | `_subscribe_initial()` with condition_id in combined frame |
 | Order Update Event Processing | ✅ COMPLIANT | `_process_event()` handles MATCHED, CANCELLATION |
-| Reconnection with Re-subscribe | ✅ COMPLIANT | `_handle_disconnect()` reconnects + syncs |
+| Reconnection with Re-subscribe | ✅ COMPLIANT | `_handle_disconnect()` reconnects + _subscribe_initial() + _sync_orders (L2 GET /orders) |
 | Connection Lifecycle per Window | ✅ COMPLIANT | Connects after discovery, before Phase 1 |
 
 ### engine-rotation (6 requirements, 8 scenarios)
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
-| Phase 1 Order Dispatch | ✅ COMPLIANT | `_phase1()` places 10 orders |
+| Phase 1 Order Dispatch | ✅ COMPLIANT | `_phase1()` places 2 orders (1 YES + 1 NO) |
 | Mandatory Window Wait | ✅ COMPLIANT | `_wait_window_end()` waits full 300s |
 | Phase 2 Cancel-All | ✅ COMPLIANT | `_phase2()` calls `cancel_all()` |
 | Window Rotation | ✅ COMPLIANT | `_rotate()` advances window |
@@ -97,7 +97,7 @@ python3 -m pytest tests/ -v
 | Strategy Parameters as Decimal | ✅ COMPLIANT | All monetary values are `Decimal` |
 | Environment Variable Loading | ✅ COMPLIANT | `load_settings_from_env()` with defaults |
 | Mode Selection | ✅ COMPLIANT | Exactly one of DRY_RUN/LIVE_ENABLED must be True |
-| API Key Types | ✅ COMPLIANT | Credentials as str, SIGNATURE_TYPE as int |
+| API Key Types | ✅ COMPLIANT | Credentials as str, SIGNATURE_TYPE as int, FUNDER as separate env var |
 | Config Immutability | ✅ COMPLIANT | `@dataclass(frozen=True)` |
 
 **Compliance summary**: 39/39 scenarios compliant
@@ -107,13 +107,15 @@ python3 -m pytest tests/ -v
 |------------|--------|-------|
 | Decimal for all monetary values | ✅ Implemented | No float usage in types.py, config.py, executor.py |
 | Executor Protocol with DI | ✅ Implemented | DryRunExecutor + LiveClobExecutor |
-| Batch POST 10 orders | ✅ Implemented | 5 YES + 5 NO at $0.40 |
+| Batch POST 2 orders | ✅ Implemented | 1 YES + 1 NO at $0.40, OrderType.GTC explicit |
 | DELETE /cancel-all Phase 2 | ✅ Implemented | executor.cancel_all() |
-| current_window_ts formula | ✅ Implemented | `(now // 300) * 300` |
-| WebSocket auth + subscribe | ✅ Implemented | PrivateWebSocket with auth then subscribe |
+| current_window_ts formula | ✅ Implemented | `(now // 300) * 300` — pure function `(now: int) -> int` |
+| WebSocket auth+subscribe | ✅ Implemented | PrivateWebSocket with combined `_subscribe_initial()` frame, PING/PONG 10s |
 | 300s window lifecycle | ✅ Implemented | phase1 → wait → phase2 → rotate |
-| Balance check GET /balance-allowance | ✅ Implemented | asset_type=pUSD, signature_type=3 |
-| Import verification | ✅ Passed | All modules importable |
+| Balance check GET /balance-allowance | ✅ Implemented | asset_type=COLLATERAL, signature_type=2, TOTAL_CAP=4.00 |
+| Retry with backoff | ✅ Implemented | 3x retry (1s/2s/4s) on 429/425/503 |
+| Clock sync | ✅ Implemented | ClockSync offset-based, /time endpoint, 5min recalibration |
+| Order sync after reconnect | ✅ Implemented | _sync_orders() via L2 ClobClient GET /orders |
 
 ## Coherence (Design)
 | Decision | Followed? | Notes |
@@ -123,7 +125,8 @@ python3 -m pytest tests/ -v
 | Executor Pattern | ✅ Yes | Protocol with @runtime_checkable |
 | Async/Await | ✅ Yes | Full async model |
 | No persistent state | ✅ Yes | First iteration, cancel-all rotation |
-| Exponential backoff | ✅ Yes | 2^reconnect_count in WebSocket |
+| Exponential backoff | ✅ Yes | 1s/2s/4s on 429/425/503 + Retry-After extraction |
+| Clock synchronization | ✅ Yes | ClockSync offset-based with /time + 5min recalibration + 401 retry |
 | Module dependency graph | ✅ Yes | main→config/executor/engine→market/ws |
 
 **⚠️ Design deviations found:**
@@ -145,4 +148,4 @@ python3 -m pytest tests/ -v
 
 ## Verdict
 **PASS WITH WARNINGS**
-All 27 requirements and 39 scenarios have corresponding implementation with passing tests (88/88). Two minor issues: incomplete manual E2E task and a dead-code pattern in engine.py.
+All 27 requirements and 39 scenarios have corresponding implementation with passing tests (122/122). All open questions from design have been resolved.

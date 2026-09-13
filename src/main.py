@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
 from src.config import Settings, load_settings_from_env
-from src.executor import DryRunExecutor, LiveClobExecutor
+from src.executor import DryRunExecutor, LiveClobExecutor, PaperLiveExecutor
 from src.engine import Engine
 from src.market import current_window_ts, discover
 from src.websocket import PrivateWebSocket
@@ -26,14 +26,15 @@ logger = logging.getLogger(__name__)
 def select_executor(settings: Settings) -> Any:
     """Select the appropriate executor based on configuration mode.
 
-    DRY_RUN=True → DryRunExecutor (paper trading)
-    LIVE_ENABLED=True → LiveClobExecutor (live trading)
+    DRY_RUN=True, LIVE_ENABLED=False → DryRunExecutor (paper trading)
+    LIVE_ENABLED=True, DRY_RUN=False → LiveClobExecutor (live trading)
+    LIVE_ENABLED=True, DRY_RUN=True  → PaperLiveExecutor (live infra, paper execution)
 
     Args:
         settings: Frozen Settings object with mode selection.
 
     Returns:
-        An Executor instance (DryRunExecutor or LiveClobExecutor).
+        An Executor instance (DryRunExecutor, LiveClobExecutor, or PaperLiveExecutor).
 
     Raises:
         ValueError: If settings are invalid.
@@ -51,10 +52,23 @@ def select_executor(settings: Settings) -> Any:
             private_key=settings.POLYMARKET_PRIVATE_KEY,
             base_url=settings.CLOB_BASE_URL,
             signature_type=settings.SIGNATURE_TYPE,
-            funder=settings.POLYMARKET_PROXY_ADDRESS or None,
+            funder=settings.FUNDER or None,
         )
 
-    raise ValueError("Invalid mode selection: exactly one of DRY_RUN/LIVE_ENABLED must be True")
+    if settings.LIVE_ENABLED and settings.DRY_RUN:
+        logger.info("Selected PaperLiveExecutor (PAPER_LIVE: live infra, paper execution)")
+        return PaperLiveExecutor(
+            api_key=settings.POLYMARKET_API_KEY,
+            api_secret=settings.POLYMARKET_API_SECRET,
+            api_passphrase=settings.POLYMARKET_API_PASSPHRASE,
+            private_key=settings.POLYMARKET_PRIVATE_KEY,
+            base_url=settings.CLOB_BASE_URL,
+            chain_id=137,
+            signature_type=settings.SIGNATURE_TYPE,
+            funder=settings.FUNDER or None,
+        )
+
+    raise ValueError("Invalid mode selection: at least one of DRY_RUN/LIVE_ENABLED must be True")
 
 
 async def connect_websocket(
@@ -69,7 +83,7 @@ async def connect_websocket(
         on_order_update: Async callback for fill events.
         settings: Configuration for WebSocket credentials.
     """
-    if settings.DRY_RUN:
+    if settings.DRY_RUN and not settings.LIVE_ENABLED:
         logger.warning("DRY_RUN mode: skipping WebSocket connection")
         return None
 
@@ -77,7 +91,11 @@ async def connect_websocket(
         api_key=settings.POLYMARKET_API_KEY,
         api_secret=settings.POLYMARKET_API_SECRET,
         api_passphrase=settings.POLYMARKET_API_PASSPHRASE,
+        private_key=settings.POLYMARKET_PRIVATE_KEY,
         base_url=settings.WS_URL,
+        chain_id=137,
+        signature_type=settings.SIGNATURE_TYPE,
+        funder=settings.FUNDER or None,
     )
 
     for attempt in range(1, 4):
@@ -122,8 +140,8 @@ async def balance_check() -> Decimal:
         creds=creds,
         signature_type=settings.SIGNATURE_TYPE,
     )
-    if settings.POLYMARKET_PROXY_ADDRESS:
-        kwargs["funder"] = settings.POLYMARKET_PROXY_ADDRESS
+    if settings.FUNDER:
+        kwargs["funder"] = settings.FUNDER
     client = ClobClient(**kwargs)
     params = BalanceAllowanceParams(
         asset_type=AssetType.COLLATERAL,

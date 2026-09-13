@@ -37,7 +37,7 @@ class TestSettingsDefaults:
         s = Settings()
         assert s.PRICE_THRESHOLD == Decimal("0.40")
         assert s.MAX_PER_SIDE == Decimal("2.00")
-        assert s.TOTAL_CAP == Decimal("20.00")
+        assert s.TOTAL_CAP == Decimal("4.00")
         assert not isinstance(s.PRICE_THRESHOLD, float)
 
     def test_share_floor_int(self) -> None:
@@ -68,8 +68,9 @@ class TestSettingsImmutability:
 class TestSettingsModeValidation:
     """Test that invalid mode combinations raise errors."""
 
-    def test_dual_mode_raises(self) -> None:
-        with pytest.raises(ValueError, match="cannot both be True"):
+    def test_paper_live_requires_keys(self) -> None:
+        """PAPER_LIVE (both True) without keys should raise."""
+        with pytest.raises(ValueError, match="PAPER_LIVE.*requires"):
             Settings(LIVE_ENABLED=True, DRY_RUN=True)
 
     def test_no_mode_raises(self) -> None:
@@ -79,6 +80,19 @@ class TestSettingsModeValidation:
     def test_live_missing_keys_raises(self) -> None:
         with pytest.raises(ValueError, match="requires"):
             Settings(LIVE_ENABLED=True, DRY_RUN=False)
+
+    def test_paper_live_with_keys_valid(self) -> None:
+        """PAPER_LIVE with all keys should be valid."""
+        s = Settings(
+            LIVE_ENABLED=True,
+            DRY_RUN=True,
+            POLYMARKET_API_KEY="key",
+            POLYMARKET_API_SECRET="secret",
+            POLYMARKET_API_PASSPHRASE="pass",
+            POLYMARKET_PRIVATE_KEY="priv",
+        )
+        assert s.LIVE_ENABLED is True
+        assert s.DRY_RUN is True
 
 
 class TestSettingsEnvLoading:
@@ -93,8 +107,9 @@ class TestSettingsEnvLoading:
         assert s.LIVE_ENABLED is False
 
     def test_live_env(self, monkeypatch) -> None:
-        """With live env vars, constructs LiveClobExecutor-ready Settings."""
+        """With live env vars, constructs LiveClobExecutor-ready Settings (DRY_RUN=false)."""
         monkeypatch.setenv("LIVE_ENABLED", "true")
+        monkeypatch.setenv("DRY_RUN", "false")
         monkeypatch.setenv("POLYMARKET_API_KEY", "test_key")
         monkeypatch.setenv("POLYMARKET_API_SECRET", "test_secret")
         monkeypatch.setenv("POLYMARKET_API_PASSPHRASE", "test_pass")
@@ -102,6 +117,19 @@ class TestSettingsEnvLoading:
         s = load_settings_from_env()
         assert s.LIVE_ENABLED is True
         assert s.DRY_RUN is False
+        assert s.POLYMARKET_API_KEY == "test_key"
+
+    def test_paper_live_env(self, monkeypatch) -> None:
+        """With both LIVE_ENABLED and DRY_RUN true, constructs PAPER_LIVE Settings."""
+        monkeypatch.setenv("LIVE_ENABLED", "true")
+        monkeypatch.setenv("DRY_RUN", "true")
+        monkeypatch.setenv("POLYMARKET_API_KEY", "test_key")
+        monkeypatch.setenv("POLYMARKET_API_SECRET", "test_secret")
+        monkeypatch.setenv("POLYMARKET_API_PASSPHRASE", "test_pass")
+        monkeypatch.setenv("POLYMARKET_PRIVATE_KEY", "test_priv")
+        s = load_settings_from_env()
+        assert s.LIVE_ENABLED is True
+        assert s.DRY_RUN is True
         assert s.POLYMARKET_API_KEY == "test_key"
 
     def test_signature_type_default(self, monkeypatch) -> None:

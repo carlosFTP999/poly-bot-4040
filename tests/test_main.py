@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.config import Settings, load_settings_from_env
 from src.main import select_executor, balance_check, run_bot
-from src.executor import DryRunExecutor, LiveClobExecutor
+from src.executor import DryRunExecutor, LiveClobExecutor, PaperLiveExecutor
 
 
 class TestSelectExecutor:
@@ -34,9 +34,22 @@ class TestSelectExecutor:
         assert isinstance(executor, LiveClobExecutor)
 
     def test_dual_mode_raises(self) -> None:
-        """Both modes True should raise ValueError."""
-        with pytest.raises(ValueError):
+        """Both modes True without keys should raise ValueError at Settings construction."""
+        with pytest.raises(ValueError, match="PAPER_LIVE.*requires"):
             select_executor(Settings(LIVE_ENABLED=True, DRY_RUN=True))
+
+    def test_paper_live_selects_paperlive_executor(self) -> None:
+        """Both modes True WITH keys should select PaperLiveExecutor."""
+        settings = Settings(
+            LIVE_ENABLED=True,
+            DRY_RUN=True,
+            POLYMARKET_API_KEY="key",
+            POLYMARKET_API_SECRET="secret",
+            POLYMARKET_API_PASSPHRASE="pass",
+            POLYMARKET_PRIVATE_KEY="priv",
+        )
+        executor = select_executor(settings)
+        assert isinstance(executor, PaperLiveExecutor)
 
     def test_no_mode_raises(self) -> None:
         """Both modes False should raise ValueError."""

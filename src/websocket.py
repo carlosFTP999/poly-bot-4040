@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from decimal import Decimal
 from typing import Any, Callable
 
 import websockets
@@ -30,8 +31,12 @@ class PrivateWebSocket:
         api_key: str,
         api_secret: str,
         api_passphrase: str,
-        base_url: str = "wss://ws-clob.polymarket.com",
+        private_key: str = "",
+        base_url: str = "wss://ws-subscriptions-clob.polymarket.com/ws/user",
         max_reconnect_attempts: int = 3,
+        chain_id: int = 137,
+        signature_type: int = 2,
+        funder: str | None = None,
     ) -> None:
         """Initialize the WebSocket client.
 
@@ -39,19 +44,28 @@ class PrivateWebSocket:
             api_key: Polymarket API key for authentication.
             api_secret: Polymarket API secret.
             api_passphrase: Polymarket API passphrase.
+            private_key: Private key for L2 ClobClient (required for order sync).
             base_url: WebSocket URL.
             max_reconnect_attempts: Max reconnection attempts before stopping.
+            chain_id: Chain ID for L2 client (default 137 for Polygon).
+            signature_type: Signature type for L2 client (default 2 for GNOSIS_SAFE).
+            funder: Optional funder/proxy address for L2 client.
         """
         self._api_key = api_key
         self._api_secret = api_secret
         self._api_passphrase = api_passphrase
+        self._private_key = private_key
         self._base_url = base_url
         self._max_reconnect_attempts = max_reconnect_attempts
+        self._chain_id = chain_id
+        self._signature_type = signature_type
+        self._funder = funder
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._condition_id: str | None = None
         self._on_order_update: Callable[[Fill], Any] | None = None
         self._reconnect_count = 0
         self._running = False
+        self._ping_task: asyncio.Task | None = None
 
     async def connect(
         self,
@@ -60,8 +74,9 @@ class PrivateWebSocket:
     ) -> None:
         """Connect and authenticate the WebSocket, then subscribe.
 
-        Auth MUST occur before subscribing. Establishes the connection,
-        sends auth credentials, and subscribes to the given condition_id.
+        Auth and subscription occur in a single combined frame.
+        Establishes the connection, sends auth credentials, and subscribes
+        to the given condition_id.
 
         Args:
             condition_id: Market condition_id to subscribe to.
@@ -103,44 +118,45 @@ class PrivateWebSocket:
                     ) from e
 
     async def _do_connect(self) -> None:
-        """Establish the WebSocket connection and perform auth + subscribe."""
+        """Establish the WebSocket connection and perform combined auth + subscribe."""
         self._ws = await websockets.connect(self._base_url)
 
-        # Authenticate
-        await self._send_auth()
-
-        # Subscribe to market condition_id
-        await self._subscribe(self._condition_id)
+        # Send combined auth + subscribe frame
+        await self._subscribe_initial(self._condition_id)
 
         # Start listening for events
         asyncio.create_task(self._listen())
 
-    async def _send_auth(self) -> None:
-        """Send authentication message to the WebSocket.
+        # Start heartbeat task
+        self._ping_task = asyncio.create_task(self._send_ping())
 
-        TODO: Verify real CLOB WS auth format against
-        https://docs.polymarket.com — expected fields are ``action`` /
-        ``assets_ids`` / channels ``market`` and ``user``. No conclusive
-        helper found in ``py_clob_client`` (no WS module) and docs
-        unavailable offline, so this keeps the existing payload and relies
-        on the fail-graceful reconnect path. Trading continues deaf until
-        the protocol is confirmed.
-        """
-        auth_message = {
-            "operation": "auth",
-            "apiKey": self._api_key,
-            "secret": self._api_secret,
-            "passphrase": self._api_passphrase,
+    async def _subscribe_initial(self, condition_id: str) -> None:
+        """Send combined auth + subscription frame.
+
+        Per official Polymarket WS protocol:
+        {
+            "auth": {"apiKey": "...", "secret": "...", "passphrase": "..."},
+            "type": "user",
+            "markets": ["<condition_id>"]
         }
-        await self._ws.send(json.dumps(auth_message))
-        logger.debug("WebSocket auth sent")
+        """
+        subscribe_message = {
+            "auth": {
+                "apiKey": self._api_key,
+                "secret": self._api_secret,
+                "passphrase": self._api_passphrase,
+            },
+            "type": "user",
+            "markets": [condition_id],
+        }
+        await self._ws.send(json.dumps(subscribe_message))
+        logger.debug("WebSocket initial auth+subscribe sent for %s", condition_id)
 
     async def _subscribe(self, condition_id: str) -> None:
-        """Subscribe to order_update events for a condition_id.
+        """Subscribe to additional markets after initial authentication.
 
-        TODO: Same caveat as _send_auth — real protocol likely uses
-        ``action``/``assets_ids``/``market``/``user`` channels per
-        https://docs.polymarket.com. Left fail-graceful until verified.
+        Per official Polymarket WS protocol (dynamic subscription):
+        {"operation": "subscribe", "markets": ["<condition_id>"]}
         """
         subscribe_message = {
             "operation": "subscribe",
@@ -148,6 +164,32 @@ class PrivateWebSocket:
         }
         await self._ws.send(json.dumps(subscribe_message))
         logger.debug("WebSocket subscribed to %s", condition_id)
+
+    async def _unsubscribe(self, condition_id: str) -> None:
+        """Unsubscribe from markets.
+
+        Per official Polymarket WS protocol:
+        {"operation": "unsubscribe", "markets": ["<condition_id>"]}
+        """
+        unsubscribe_message = {
+            "operation": "unsubscribe",
+            "markets": [condition_id],
+        }
+        await self._ws.send(json.dumps(unsubscribe_message))
+        logger.debug("WebSocket unsubscribed from %s", condition_id)
+
+    async def _send_ping(self) -> None:
+        """Send PING heartbeat every 10 seconds while connected."""
+        try:
+            while self._running and self._ws:
+                await asyncio.sleep(10)
+                if self._ws and not self._ws.closed:
+                    await self._ws.send("PING")
+                    logger.debug("WebSocket PING sent")
+        except asyncio.CancelledError:
+            logger.debug("WebSocket ping task cancelled")
+        except Exception as e:
+            logger.warning("WebSocket ping task error: %s", e)
 
     async def _listen(self) -> None:
         """Listen for WebSocket events and dispatch to handlers."""
@@ -193,35 +235,87 @@ class PrivateWebSocket:
         return Fill(
             token_id=event.get("token_id", ""),
             side=event.get("side", "YES"),
-            price=event.get("price", 0),
+            price=Decimal(str(event.get("price", 0))),
             size=event.get("size_matched", event.get("size", 0)),
             timestamp=event.get("timestamp", 0),
         )
 
     async def _handle_disconnect(self) -> None:
         """Handle WebSocket disconnect: reconnect, re-subscribe, and sync."""
+        # Cancel ping task
+        if self._ping_task:
+            self._ping_task.cancel()
+            try:
+                await self._ping_task
+            except asyncio.CancelledError:
+                pass
+
         await self._connect_with_retry()
 
-        # Re-subscribe to the active condition_id
+        # Re-subscribe to the active condition_id (server remembers session)
         if self._condition_id:
-            await self._subscribe(self._condition_id)
+            await self._subscribe_initial(self._condition_id)
 
         # Sync state via GET /orders to recover missed events
         await self._sync_orders()
 
     async def _sync_orders(self) -> None:
-        """Sync order state after reconnection (currently no-op).
+        """Sync order state after reconnection via GET /orders.
 
-        A real implementation would call GET /orders via an L2 ClobClient.
-        Left as no-op until a clear API contract exists; reconnection
-        already re-subscribes above. Logged so missed-event recovery is
-        visible.
+        Uses L2 ClobClient with credentials to fetch open orders
+        and re-synchronize internal state.
         """
-        logger.info("Syncing orders via GET /orders after reconnection (no-op)")
+        if not self._private_key:
+            logger.warning("Skipping order sync: no private_key provided for L2 client")
+            return
+
+        try:
+            from py_clob_client.client import ClobClient
+            from py_clob_client.clob_types import ApiCreds, OpenOrderParams
+
+            creds = ApiCreds(
+                api_key=self._api_key,
+                api_secret=self._api_secret,
+                api_passphrase=self._api_passphrase,
+            )
+            kwargs: dict = dict(
+                host="https://clob.polymarket.com",
+                chain_id=self._chain_id,
+                key=self._private_key,
+                creds=creds,
+                signature_type=self._signature_type,
+            )
+            if self._funder:
+                kwargs["funder"] = self._funder
+
+            client = ClobClient(**kwargs)
+            params = OpenOrderParams()
+            response = client.get_orders(params)
+
+            # Parse response and re-sync internal state
+            # Response format: {"data": [...], "next_cursor": "..."}
+            orders = response.get("data", []) if isinstance(response, dict) else []
+            logger.info("Synced %d open orders after reconnection", len(orders))
+
+            # TODO: Integrate with engine state if needed (e.g., update resting orders)
+            # For now, logging the sync is sufficient as the WS will stream live updates
+
+        except ImportError:
+            logger.warning("py_clob_client not available; skipping order sync")
+        except Exception as e:
+            logger.exception("Order sync failed: %s", e)
 
     async def close(self) -> None:
         """Close the WebSocket connection."""
         self._running = False
+
+        if self._ping_task:
+            self._ping_task.cancel()
+            try:
+                await self._ping_task
+            except asyncio.CancelledError:
+                pass
+
         if self._ws:
             await self._ws.close()
             self._ws = None

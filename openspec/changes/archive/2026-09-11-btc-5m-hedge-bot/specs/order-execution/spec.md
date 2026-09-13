@@ -18,23 +18,23 @@ The system SHALL define an `Executor` protocol with two methods: `place_limit_or
 
 ### Requirement: Batch Order Placement
 
-Phase 1 SHALL send exactly 10 GTC limit orders in a single `POST /orders` batch request: 5 YES at $0.40 + 5 NO at $0.40. The batch MUST NOT exceed 15 orders (API maxItems constraint).
+Phase 1 SHALL send exactly 2 GTC limit orders in a single `POST /orders` batch request: 1 YES at $0.40 + 1 NO at $0.40. The batch includes retry with exponential backoff (1s/2s/4s) on 429/425/503.
 
-#### Scenario: Full batch of 10 orders
+#### Scenario: Full batch of 2 orders
 
 - GIVEN a market with valid token IDs for YES and NO
 - WHEN Phase 1 executes
-- THEN 10 orders are placed in one batch: 5 BUY YES at price 0.40, 5 BUY NO at price 0.40
+- THEN 2 orders are placed in one batch: 1 BUY YES at price 0.40, 1 BUY NO at price 0.40
 
-#### Scenario: Batch size under API limit
+#### Scenario: Retry on rate limit
 
-- GIVEN the batch contains 10 orders
-- WHEN the request is sent
-- THEN the batch size (10) is strictly less than the API max (15)
+- GIVEN a batch POST returns 429
+- WHEN the retry logic activates
+- THEN the request is retried up to 3 times with 1s/2s/4s backoff
 
 ### Requirement: GTC Order Type
 
-All orders MUST be GTC (Good Till Cancelled) with `orderType: "GTC"` and `expiration: 0`. Orders SHALL NOT expire automatically.
+All orders MUST be GTC (Good Till Cancelled) with explicit `orderType=OrderType.GTC` and `expiration: 0`. Orders SHALL NOT expire automatically.
 
 #### Scenario: GTC persistence
 
@@ -67,6 +67,18 @@ Every order MUST specify a `size` of at least 5 shares (Polymarket minimum for G
 - GIVEN a `DryRunExecutor` with 3 resting orders
 - WHEN `cancel_all()` is called
 - THEN resting orders count is 0 and `cancelled_count` is 3
+
+### Requirement: L2 Executor (LiveClobExecutor)
+
+`LiveClobExecutor` MUST be an L2 executor built on `py_clob_client.ClobClient` with `host=CLOB_BASE_URL`, `chain_id=137`, `key=POLYMARKET_PRIVATE_KEY`, `creds=ApiCreds(...)`, `signature_type=SIGNATURE_TYPE` (default 2), and optional `funder=POLYMARKET_FUNDER` (or fallback to `POLYMARKET_PROXY_ADDRESS`). Order placement SHALL use `OrderArgs` + `create_order`/`post_order` with explicit `orderType=OrderType.GTC`; batch placement uses `post_orders(PostOrdersArgs)`. Cancel SHALL use `cancel_all()` (`DELETE /cancel-all`). Includes `_post_with_clock_retry()` for 401 timestamp recovery.
+
+### Requirement: Retry with Exponential Backoff
+
+All order placement and cancel operations MUST retry up to 3 times with exponential backoff (1s, 2s, 4s) on HTTP 429 (rate limit), 425 (too early), and 503 (service unavailable). On 429, Retry-After header is extracted when available.
+
+### Requirement: Clock Synchronization
+
+`LiveClobExecutor` MUST use `ClockSync` for offset-based clock synchronization with the CLOB `/time` endpoint. The clock recalibrates every 5 minutes. On 401 timestamp errors, `force_recalibrate()` is called and the operation is retried once.
 
 ### Requirement: LiveClobExecutor Key Validation
 

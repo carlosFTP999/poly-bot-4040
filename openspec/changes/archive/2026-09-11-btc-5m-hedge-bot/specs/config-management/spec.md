@@ -56,20 +56,18 @@ The system MUST support two mutually exclusive modes: `DRY_RUN=True` uses `DryRu
 
 ### Requirement: API Key Types
 
-`POLYMARKET_PRIVATE_KEY`, `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`, and `POLYMARKET_PROXY_ADDRESS` MUST be loaded as strings. `SIGNATURE_TYPE` MUST be `int` (default 3).
+`POLYMARKET_PRIVATE_KEY`, `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`, `POLYMARKET_PROXY_ADDRESS`, and `POLYMARKET_FUNDER` MUST be loaded as strings. `SIGNATURE_TYPE` MUST be `int` (default 2 — `GNOSIS_SAFE` for browser wallets; `0=EOA`, `1=POLY_PROXY`, `3=DEPOSIT_WALLET`).
 
 #### Scenario: Signature type default
 
 - GIVEN `SIGNATURE_TYPE` is not set in environment
 - WHEN the config is loaded
-- THEN `SIGNATURE_TYPE` is `int(3)`
+- THEN `SIGNATURE_TYPE` is `int(2)`
 
-### Requirement: Config Immutability
+### Requirement: FUNDER Separate Environment Variable
 
-Once loaded, the config object MUST NOT be mutable at runtime. All values are read-only after construction.
+`POLYMARKET_FUNDER` MUST be loaded as a separate environment variable. If empty, `POLYMARKET_PROXY_ADDRESS` is used as the fallback funder address for the `ClobClient`.
 
-#### Scenario: Runtime mutation blocked
+### Requirement: Mode Selection (PAPER_LIVE)
 
-- GIVEN a loaded config with `PRICE_THRESHOLD=Decimal("0.40")`
-- WHEN code attempts `config.PRICE_THRESHOLD = Decimal("0.50")`
-- THEN an error is raised or the assignment is rejected
+The system MUST support three valid mode combinations: `DRY_RUN=True` only uses `DryRunExecutor`; `LIVE_ENABLED=True` only uses `LiveClobExecutor`; `LIVE_ENABLED=True + DRY_RUN=True` uses `PaperLiveExecutor` (PAPER_LIVE mode, requires all API keys). Both being `False` is invalid.

@@ -80,8 +80,8 @@ class TestRunCycle:
         assert await engine._balance_check() == Decimal("3.50")
 
     @pytest.mark.asyncio
-    async def test_phase1_places_10_orders(self) -> None:
-        """Phase 1 should call place_limit_order exactly 10 times."""
+    async def test_phase1_places_2_orders(self) -> None:
+        """Phase 1 should call place_limit_orders_batch once with 2 orders."""
         settings = Settings()
         mock_executor = AsyncMock()
         mock_market = MarketInfo(
@@ -99,7 +99,10 @@ class TestRunCycle:
             config=settings,
         )
         await engine._phase1(mock_market)
-        assert mock_executor.place_limit_order.call_count == 10
+        # Batch method should be called once with 2 OrderArgs
+        mock_executor.place_limit_orders_batch.assert_awaited_once()
+        call_args = mock_executor.place_limit_orders_batch.call_args[0][0]
+        assert len(call_args) == 2
 
     @pytest.mark.asyncio
     async def test_phase1_uses_correct_price_and_size(self) -> None:
@@ -121,15 +124,16 @@ class TestRunCycle:
             config=settings,
         )
         await engine._phase1(mock_market)
-        # Check that all calls use the correct price and size
-        for call in mock_executor.place_limit_order.call_args_list:
-            kwargs = call[1]  # keyword args
-            assert kwargs["price"] == settings.PRICE_THRESHOLD
-            assert kwargs["size"] == settings.SHARE_FLOOR
+        # Check that batch was called with correct price and size in OrderArgs
+        mock_executor.place_limit_orders_batch.assert_awaited_once()
+        call_args = mock_executor.place_limit_orders_batch.call_args[0][0]
+        for order_arg in call_args:
+            assert order_arg.price == float(settings.PRICE_THRESHOLD)
+            assert order_arg.size == float(settings.SHARE_FLOOR)
 
     @pytest.mark.asyncio
     async def test_phase1_splits_yes_and_no(self) -> None:
-        """Phase 1 should place 5 YES and 5 NO orders."""
+        """Phase 1 should place 1 YES and 1 NO orders."""
         settings = Settings()
         mock_executor = AsyncMock()
         mock_market = MarketInfo(
@@ -147,11 +151,12 @@ class TestRunCycle:
             config=settings,
         )
         await engine._phase1(mock_market)
-        call_args = mock_executor.place_limit_order.call_args_list
-        yes_calls = [c for c in call_args if c[1]["token_id"] == "tok_yes"]
-        no_calls = [c for c in call_args if c[1]["token_id"] == "tok_no"]
-        assert len(yes_calls) == 5
-        assert len(no_calls) == 5
+        mock_executor.place_limit_orders_batch.assert_awaited_once()
+        call_args = mock_executor.place_limit_orders_batch.call_args[0][0]
+        yes_orders = [o for o in call_args if o.token_id == "tok_yes"]
+        no_orders = [o for o in call_args if o.token_id == "tok_no"]
+        assert len(yes_orders) == 1
+        assert len(no_orders) == 1
 
     @pytest.mark.asyncio
     async def test_cancel_all_called_in_phase2(self) -> None:

@@ -8,13 +8,13 @@ Orchestrate the 300-second window lifecycle: discover → connect WS → place o
 
 ### Requirement: Phase 1 Order Dispatch
 
-Phase 1 MUST send 10 GTC limit orders in a single batch via the Executor. The engine SHALL call `executor.place_limit_order()` for each of the 10 orders (5 YES + 5 NO at $0.40).
+Phase 1 MUST send 2 GTC limit orders in a single batch via the Executor. The engine SHALL call `executor.place_limit_order()` for each of the 2 orders (1 YES + 1 NO at $0.40), with retry on 429/425/503 (1s/2s/4s backoff).
 
 #### Scenario: Full Phase 1 execution
 
 - GIVEN a valid market with condition_id "abc123"
 - WHEN Phase 1 starts
-- THEN 10 orders are placed via the executor and the engine enters wait state
+- THEN 2 orders are placed via the executor and the engine enters wait state
 
 ### Requirement: Mandatory Window Wait
 
@@ -28,7 +28,7 @@ After Phase 1, the engine MUST wait until the current 300-second window expires.
 
 #### Scenario: Partial fills do not shorten wait
 
-- GIVEN 3 of 10 orders are filled at t=60s
+- GIVEN 1 of 2 orders are filled at t=60s
 - WHEN the engine checks fill count
 - THEN it still waits until window expiry (does not proceed early)
 
@@ -38,7 +38,7 @@ At window expiry, Phase 2 MUST execute `executor.cancel_all()` to cancel ALL pen
 
 #### Scenario: Cancel pending orders
 
-- GIVEN 7 of 10 orders remain unfilled at window end
+- GIVEN 1 of 2 orders remain unfilled at window end
 - WHEN Phase 2 executes
 - THEN `cancel_all()` is called and all pending orders are cancelled
 
@@ -70,17 +70,17 @@ If the engine enters a window more than `MAX_LATE_S = 15s` after `window_ts`, it
 
 ### Requirement: Balance Check Before Phase 1
 
-Before placing orders, the engine MUST verify pUSD balance >= `TOTAL_CAP` (20.00) via L2 `ClobClient.get_balance_allowance(BalanceAllowanceParams(asset_type=COLLATERAL, signature_type=...))` (`GET /balance-allowance` with `asset_type=pUSD`). If balance is insufficient, the engine MUST skip the window and rotate. In `DRY_RUN` the check is skipped (assumed sufficient).
+Before placing orders, the engine MUST verify pUSD balance >= `TOTAL_CAP` (4.00) via L2 `ClobClient.get_balance_allowance(BalanceAllowanceParams(asset_type=COLLATERAL, signature_type=...))` (`GET /balance-allowance` with `asset_type=pUSD`). If balance is insufficient, the engine MUST skip the window and rotate. In `DRY_RUN` the check is skipped (assumed sufficient). In `PAPER_LIVE` the real balance is checked.
 
 #### Scenario: Sufficient balance
 
-- GIVEN pUSD balance is $25.00 (>= TOTAL_CAP 20.00)
+- GIVEN pUSD balance is $5.00 (>= TOTAL_CAP 4.00)
 - WHEN the engine checks balance before Phase 1
 - THEN Phase 1 proceeds with order placement
 
 #### Scenario: Insufficient balance
 
-- GIVEN pUSD balance is $15.00 (< TOTAL_CAP 20.00)
+- GIVEN pUSD balance is $3.00 (< TOTAL_CAP 4.00)
 - WHEN the engine checks balance before Phase 1
 - THEN Phase 1 is skipped and the engine rotates to the next window
 
