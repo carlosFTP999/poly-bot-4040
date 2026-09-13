@@ -60,13 +60,23 @@ mkdir -p "$INSTALL_DIR" "$LOG_DIR"
 chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR" "$LOG_DIR"
 success "Directories created"
 
-# Clone or update repo
+# Clone or update repo (sparse checkout - only production files)
+SPARSE_DIRS=(
+    "src/"
+    "requirements.txt"
+    "deploy/"
+    "derive_credentials.py"
+    "scripts/simulate_fills.py"
+)
+
 if [[ -d "$INSTALL_DIR/.git" ]]; then
     log "Repository exists, pulling latest..."
     sudo -u "$SERVICE_USER" git -C "$INSTALL_DIR" pull origin master
 else
-    log "Cloning repository..."
-    sudo -u "$SERVICE_USER" git clone "$REPO_URL" "$INSTALL_DIR"
+    log "Cloning repository (sparse checkout)..."
+    sudo -u "$SERVICE_USER" git clone --filter=blob:none --sparse "$REPO_URL" "$INSTALL_DIR"
+    cd "$INSTALL_DIR"
+    sudo -u "$SERVICE_USER" git sparse-checkout set "${SPARSE_DIRS[@]}"
 fi
 success "Repository ready"
 
